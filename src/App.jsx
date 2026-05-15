@@ -11,7 +11,7 @@ function App() {
       
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
       
-      <main className="flex-1 relative z-10 overflow-hidden flex flex-col">
+      <main className="flex-1 relative z-10 overflow-hidden flex flex-col pb-16 md:pb-0">
         {activeTab === 'socios' ? <SociosView /> : <NoSociosView />}
       </main>
     </div>

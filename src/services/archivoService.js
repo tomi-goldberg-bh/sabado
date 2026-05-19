@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { googleSyncService } from './googleSyncService';
 
 const STORAGE_KEY = 'sabado_archivo_unificado';
 
@@ -44,6 +45,18 @@ export const archivoService = {
     if (!all[today]) all[today] = [];
     all[today].push(record);
     saveAll(all);
+    
+    // Add to Google Sheets offline queue
+    googleSyncService.enqueueRecord({
+      ...record,
+      nombre: record.name || '',
+      metodoPago: record.payment || 'N/A',
+      hora: record.time || '',
+      grupo: (record.groups || []).join(', '),
+      dia: today,
+      monto: record.amount || 0
+    });
+
     return all;
   },
 

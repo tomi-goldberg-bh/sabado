@@ -1,4 +1,5 @@
 import { initializeApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
 import {
   initializeFirestore,
   persistentLocalCache,
@@ -7,7 +8,7 @@ import {
 
 // Configuración web de Firebase (Consola de Firebase > Configuración del proyecto > Tus apps).
 // Estos valores no son secretos: identifican el proyecto y viajan igual en el código del sitio.
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: 'AIzaSyDSNJVkhxPrRAdTBgZumPKFXq-Ujo3ySjw',
   authDomain: 'sabadoapp.firebaseapp.com',
   projectId: 'sabadoapp',
@@ -17,6 +18,8 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+
+export const auth = getAuth(app);
 
 // La caché persistente guarda los datos en el dispositivo: si se corta internet
 // se puede seguir registrando y los cambios se suben solos al volver la conexión.

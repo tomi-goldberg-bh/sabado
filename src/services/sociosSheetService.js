@@ -12,9 +12,10 @@ function parseCSV(text) {
     const apellido = (parts[0] || '').trim();
     const nombre = (parts[1] || '').trim();
     const tipo = (parts[2] || '').trim();
+    const grupo = (parts[3] || '').trim();
     const fullName = `${nombre} ${apellido}`.replace(/\s+/g, ' ').trim();
     if (fullName) {
-      rows.push({ name: fullName, apellido, nombre, tipo });
+      rows.push({ name: fullName, apellido, nombre, tipo, grupo });
     }
   }
   return rows;

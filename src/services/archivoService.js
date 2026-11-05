@@ -1,9 +1,10 @@
 import * as XLSX from 'xlsx';
 import {
-  collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, query, where, increment, writeBatch,
+  collection, doc, setDoc, getDocs, onSnapshot, query, where, increment, writeBatch,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { googleSyncService } from './googleSyncService';
+import { asistenciasCol, resolveAttendees } from './presentismoService';
 
 // Registros compartidos entre todos los dispositivos (Firestore).
 //   records/{id}  -> un registro (socio o no socio), con su fecha "DD-MM-YYYY"
@@ -13,6 +14,7 @@ const daysCol = collection(db, 'days');
 
 const LEGACY_KEY = 'sabado_archivo_unificado';
 const MIGRATED_KEY = 'sabado_archivo_migrado_firestore';
+const BACKFILL_KEY = 'sabado_asistencias_completadas_v1';
 
 function getTodayKey() {
   const d = new Date();
@@ -30,6 +32,14 @@ function parseDateKey(key) {
 function newId() {
   if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function addAttendance(batch, record) {
+  (record.attendees || []).forEach((a, i) => {
+    batch.set(doc(asistenciasCol, `${record.id}_${i}`), {
+      recordId: record.id, date: record.date, ts: record.ts || 0, tipo: record.tipo, name: a.name, group: a.group,
+    });
+  });
 }
 
 const byNewest = (a, b) => (b.ts || 0) - (a.ts || 0);
@@ -52,15 +62,21 @@ export const archivoService = {
 
   getTodayKey,
 
-  async saveRecord(record) {
+  // sheets: { socios, juventud } (filas de las planillas) para saber el grupo de cada persona.
+  async saveRecord(record, sheets) {
     const date = getTodayKey();
     const id = String(record.id || newId());
-    const full = { ...record, id, date, ts: Date.now() };
+    const ts = Date.now();
+    const attendees = resolveAttendees(record, sheets);
+    const full = { ...record, id, date, ts, attendees };
 
     // No se espera la respuesta del servidor: con la caché local el registro
     // aparece al instante y se sube cuando haya conexión.
-    setDoc(doc(recordsCol, id), full);
-    setDoc(doc(daysCol, date), { date, ts: parseDateKey(date).getTime(), count: increment(1) }, { merge: true });
+    const batch = writeBatch(db);
+    batch.set(doc(recordsCol, id), full);
+    batch.set(doc(daysCol, date), { date, ts: parseDateKey(date).getTime(), count: increment(1) }, { merge: true });
+    addAttendance(batch, full);
+    batch.commit().catch(err => console.error('No se pudo guardar el registro:', err));
 
     googleSyncService.enqueueRecord({
       ...full,
@@ -76,10 +92,13 @@ export const archivoService = {
   },
 
   deleteRecord(record) {
-    deleteDoc(doc(recordsCol, String(record.id)));
+    const batch = writeBatch(db);
+    batch.delete(doc(recordsCol, String(record.id)));
     if (record.date) {
-      setDoc(doc(daysCol, record.date), { count: increment(-1) }, { merge: true });
+      batch.set(doc(daysCol, record.date), { count: increment(-1) }, { merge: true });
     }
+    (record.attendees || []).forEach((_, i) => batch.delete(doc(asistenciasCol, `${record.id}_${i}`)));
+    batch.commit().catch(err => console.error('No se pudo borrar el registro:', err));
   },
 
   // Escucha en tiempo real los registros de un día. Devuelve la función para dejar de escuchar.
@@ -111,18 +130,24 @@ export const archivoService = {
   },
 
   // Sube una sola vez los registros que este dispositivo tenía guardados solo en su navegador.
-  async migrateLocalRecords() {
+  async migrateLocalRecords(sheets) {
     try {
       if (localStorage.getItem(MIGRATED_KEY)) return;
       const raw = localStorage.getItem(LEGACY_KEY);
       const all = raw ? JSON.parse(raw) : {};
       const entries = Object.entries(all).flatMap(([date, recs]) =>
-        (recs || []).map(r => ({ ...r, id: String(r.id || newId()), date, ts: r.ts || parseDateKey(date).getTime() }))
+        (recs || []).map(r => {
+          const rec = { ...r, id: String(r.id || newId()), date, ts: r.ts || parseDateKey(date).getTime() };
+          return { ...rec, attendees: resolveAttendees(rec, sheets) };
+        })
       );
-      // Lotes de hasta 400 escrituras (el máximo de Firestore es 500).
-      for (let i = 0; i < entries.length; i += 400) {
+      // Lotes chicos (Firestore admite hasta 500 escrituras por lote; cada registro usa varias).
+      for (let i = 0; i < entries.length; i += 100) {
         const batch = writeBatch(db);
-        entries.slice(i, i + 400).forEach(r => batch.set(doc(recordsCol, r.id), r, { merge: true }));
+        entries.slice(i, i + 100).forEach(r => {
+          batch.set(doc(recordsCol, r.id), r, { merge: true });
+          addAttendance(batch, r);
+        });
         await batch.commit();
       }
       // Recalcular los contadores de los días migrados a partir de lo que hay en la base.
@@ -134,6 +159,28 @@ export const archivoService = {
       localStorage.setItem(MIGRATED_KEY, new Date().toISOString());
     } catch (err) {
       console.error('No se pudieron migrar los registros locales:', err);
+    }
+  },
+
+  // Una sola vez por dispositivo: arma la asistencia de los registros que se guardaron
+  // antes de que existiera Presentismo.
+  async backfillAttendance(sheets) {
+    try {
+      if (localStorage.getItem(BACKFILL_KEY)) return;
+      const snap = await getDocs(recordsCol);
+      const pending = snap.docs.map(d => d.data()).filter(r => !Array.isArray(r.attendees));
+      for (let i = 0; i < pending.length; i += 100) {
+        const batch = writeBatch(db);
+        pending.slice(i, i + 100).forEach(r => {
+          const withAtt = { ...r, attendees: resolveAttendees(r, sheets) };
+          batch.set(doc(recordsCol, r.id), { attendees: withAtt.attendees }, { merge: true });
+          addAttendance(batch, withAtt);
+        });
+        await batch.commit();
+      }
+      localStorage.setItem(BACKFILL_KEY, new Date().toISOString());
+    } catch (err) {
+      console.error('No se pudo completar la asistencia de registros anteriores:', err);
     }
   },
 

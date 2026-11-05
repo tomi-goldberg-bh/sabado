@@ -3,6 +3,7 @@ import { Search, Trash2, CheckCircle2, Clock, FolderOpen, Download, History, Loa
 import { archivoService } from '../services/archivoService';
 import { recentNamesService } from '../services/recentNamesService';
 import { sociosSheetService } from '../services/sociosSheetService';
+import { nosociosSheetService } from '../services/nosociosSheetService';
 import { ArchivoBrowser } from './ArchivoBrowser';
 
 export const SociosView = () => {
@@ -62,7 +63,7 @@ export const SociosView = () => {
       const fromSheet = sheetSocios
         .filter(s => s.name.toLowerCase().includes(lower))
         .slice(0, 10)
-        .map(s => ({ id: `sheet-${s.name}`, name: s.name, tipo: s.tipo, isSheet: true }));
+        .map(s => ({ id: `sheet-${s.name}`, name: s.name, tipo: s.tipo, grupo: s.grupo, isSheet: true }));
       const sheetNames = new Set(fromSheet.map(s => s.name.toLowerCase()));
       const fromRecent = recentNamesService
         .searchNames(searchTerm)
@@ -91,9 +92,10 @@ export const SociosView = () => {
         tipo: 'socio',
         socioOriginalId: socio.isRecent ? null : socio.id,
         name: socio.name,
+        nameGroups: [socio.grupo || ''],
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
-      archivoService.saveRecord(entry);
+      archivoService.saveRecord(entry, { socios: sheetSocios, juventud: nosociosSheetService.getCachedSocios() });
       recentNamesService.addName(socio.name);
     }
     setSearchTerm('');

@@ -3,30 +3,10 @@ import { Search, Trash2, CheckCircle2, Clock, Wallet, Smartphone, Plus, DollarSi
 import { archivoService } from '../services/archivoService';
 import { recentNamesService } from '../services/recentNamesService';
 import { nosociosSheetService } from '../services/nosociosSheetService';
+import { sociosSheetService } from '../services/sociosSheetService';
+import { GROUPS, matchGroup } from '../config/groups';
 import { ArchivoBrowser } from './ArchivoBrowser';
 import clsx from 'clsx';
-
-const GROUPS = [
-  'Shaiajut', 'Metailim', 'Zoharim', 'Mekorim', 'Otzar', 'Akebot',
-  'Iedidim', 'Shebibim', 'Balagan', 'Mejubar', 'Neshama', 'Alufim',
-  'Jazak', 'Anakim'
-];
-
-const GROUPS_LOWER = new Set(GROUPS.map(g => g.toLowerCase()));
-
-function normalizeGroup(g) {
-  return g.trim().toLowerCase().replace(/\s*\(.*?\)\s*/g, '').trim();
-}
-
-function matchGroup(sheetGroup) {
-  const norm = normalizeGroup(sheetGroup);
-  if (!norm) return null;
-  for (const g of GROUPS) {
-    if (g.toLowerCase() === norm) return g;
-  }
-  const matching = GROUPS.find(g => g.toLowerCase().includes(norm) || norm.includes(g.toLowerCase()));
-  return matching || null;
-}
 
 const PRICE_OPTIONS = [
   { key: 'peula', label: 'Peula', amount: 8000 },
@@ -165,7 +145,7 @@ export const NoSociosView = () => {
       return;
     }
 
-    const newEntry = { name };
+    const newEntry = { name, grupo: opt.isSheet ? (opt.grupo || '') : '' };
 
     if (opt.isSheet && opt.grupo) {
       const matched = matchGroup(opt.grupo);
@@ -217,8 +197,10 @@ export const NoSociosView = () => {
     }
 
     const names = selectedNames.map(s => s.name);
+    const nameGroups = selectedNames.map(s => s.grupo || '');
     if (pendingText && !names.some(n => n.toLowerCase() === pendingText.toLowerCase())) {
       names.push(pendingText);
+      nameGroups.push('');
     }
     const joinedName = names.join(' + ');
     names.forEach(n => recentNamesService.addName(n));
@@ -227,6 +209,7 @@ export const NoSociosView = () => {
       tipo: 'no_socio',
       name: joinedName,
       names: names,
+      nameGroups,
       groups: selectedGroups,
       payment: paymentMethod,
       priceKey: selectedPriceKey,
@@ -234,7 +217,7 @@ export const NoSociosView = () => {
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
-    archivoService.saveRecord(entry);
+    archivoService.saveRecord(entry, { socios: sociosSheetService.getCachedSocios(), juventud: sheetData });
 
     setSearchTerm('');
     setSelectedNames([]);
@@ -434,7 +417,7 @@ export const NoSociosView = () => {
                           {opt.isRecent && <History className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
                           {opt.isSheet && opt.grupo && (
                             <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200 px-1.5 py-0.5 rounded shrink-0 leading-tight">
-                              {normalizeGroup(opt.grupo)}
+                              {matchGroup(opt.grupo) || opt.grupo}
                             </span>
                           )}
                           <span className="truncate">{opt.name}</span>

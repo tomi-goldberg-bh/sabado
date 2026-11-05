@@ -1,14 +1,29 @@
 import { useState, useEffect } from 'react';
-import { Users, UserPlus, Wifi, WifiOff } from 'lucide-react';
+import { Users, UserPlus, Wifi, WifiOff, CalendarCheck, KeyRound, LogOut } from 'lucide-react';
 import { archivoService } from '../services/archivoService';
+import { authService } from '../services/authService';
 import clsx from 'clsx';
 
-export const Sidebar = ({ activeTab, setActiveTab }) => {
+const ALL_TABS = {
+  socios: { label: 'SOCIOS', icon: Users },
+  nosocios: { label: 'NO SOCIOS', icon: UserPlus },
+  presentismo: { label: 'PRESENTISMO', icon: CalendarCheck },
+  usuarios: { label: 'USUARIOS', icon: KeyRound },
+};
+
+export const Sidebar = ({ tabs, activeTab, setActiveTab, profile }) => {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     return archivoService.subscribeStatus(({ online, synced }) => setConnected(online && synced));
   }, []);
+
+  const handleLogout = () => {
+    if (window.confirm('¿Cerrar sesión en este dispositivo?')) authService.logout();
+  };
+
+  const roleLabel = profile.role === 'admin' ? 'Administrador' : `Grupo ${profile.group}`;
+
   return (
     <>
       <div className="hidden md:flex w-64 bg-white h-full flex-col p-4 shadow-xl border-r border-slate-200 z-10 relative">
@@ -25,46 +40,34 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
         </div>
 
         <nav className="flex flex-col gap-3">
-          <button
-            onClick={() => setActiveTab('socios')}
-            className={clsx(
-              "flex items-center gap-3 px-4 py-4 rounded-xl font-medium transition-all duration-300 relative overflow-hidden group",
-              activeTab === 'socios'
-                ? "bg-brand-blue text-white shadow-md shadow-brand-blue/30"
-                : "text-brand-grey hover:bg-slate-100"
-            )}
-          >
-            <Users className={clsx(
-              "w-5 h-5 transition-transform duration-300",
-              activeTab === 'socios' ? "scale-110" : "group-hover:scale-110"
-            )} />
-            <span className="z-10">SOCIOS</span>
-            {activeTab === 'socios' && (
-              <div className="absolute left-0 top-0 bottom-0 w-1 bg-brand-accent rounded-l-xl"></div>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveTab('nosocios')}
-            className={clsx(
-              "flex items-center gap-3 px-4 py-4 rounded-xl font-medium transition-all duration-300 relative overflow-hidden group",
-              activeTab === 'nosocios'
-                ? "bg-brand-blue text-white shadow-md shadow-brand-blue/30"
-                : "text-brand-grey hover:bg-slate-100"
-            )}
-          >
-            <UserPlus className={clsx(
-              "w-5 h-5 transition-transform duration-300",
-              activeTab === 'nosocios' ? "scale-110" : "group-hover:scale-110"
-            )} />
-            <span className="z-10">NO SOCIOS</span>
-            {activeTab === 'nosocios' && (
-              <div className="absolute left-0 top-0 bottom-0 w-1 bg-brand-accent rounded-l-xl"></div>
-            )}
-          </button>
+          {tabs.map(key => {
+            const { label, icon: Icon } = ALL_TABS[key];
+            const active = activeTab === key;
+            return (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key)}
+                className={clsx(
+                  "flex items-center gap-3 px-4 py-4 rounded-xl font-medium transition-all duration-300 relative overflow-hidden group",
+                  active
+                    ? "bg-brand-blue text-white shadow-md shadow-brand-blue/30"
+                    : "text-brand-grey hover:bg-slate-100"
+                )}
+              >
+                <Icon className={clsx(
+                  "w-5 h-5 transition-transform duration-300",
+                  active ? "scale-110" : "group-hover:scale-110"
+                )} />
+                <span className="z-10">{label}</span>
+                {active && (
+                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-brand-accent rounded-l-xl"></div>
+                )}
+              </button>
+            );
+          })}
         </nav>
 
-        <div className="mt-auto px-2 pb-4 text-center space-y-2">
+        <div className="mt-auto px-2 pb-4 text-center space-y-3">
           <div className="flex items-center justify-center gap-1.5 text-xs font-medium">
             {connected ? (
               <><Wifi className="w-3 h-3 text-green-500" /><span className="text-green-600">Sincronizado</span></>
@@ -72,7 +75,16 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
               <><WifiOff className="w-3 h-3 text-slate-400" /><span className="text-slate-400">Sin conexión</span></>
             )}
           </div>
-          <div className="text-xs text-slate-400 font-medium">Sistema de Registro</div>
+          <div className="border-t border-slate-100 pt-3">
+            <div className="text-xs font-bold text-brand-grey break-all">{profile.email}</div>
+            <div className="text-[11px] text-slate-400 font-medium mb-2">{roleLabel}</div>
+            <button
+              onClick={handleLogout}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-red-600 transition-colors"
+            >
+              <LogOut className="w-3.5 h-3.5" /> Cerrar sesión
+            </button>
+          </div>
         </div>
       </div>
 
@@ -84,29 +96,30 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
             <span className="flex items-center gap-1 bg-slate-100 border border-slate-200 text-slate-400 text-[10px] font-bold px-2 py-0.5 rounded-full"><WifiOff className="w-2.5 h-2.5" />Off</span>
           )}
         </div>
+        {tabs.map(key => {
+          const { label, icon: Icon } = ALL_TABS[key];
+          const active = activeTab === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={clsx(
+                "flex-1 min-w-0 flex flex-col items-center justify-center py-3 gap-1 font-bold text-[10px] transition-all duration-200",
+                active ? "text-brand-blue" : "text-slate-400 hover:text-slate-600"
+              )}
+            >
+              <Icon className={clsx("w-5 h-5", active && "scale-110")} />
+              <span className="truncate max-w-full px-1">{label}</span>
+            </button>
+          );
+        })}
         <button
-          onClick={() => setActiveTab('socios')}
-          className={clsx(
-            "flex-1 flex flex-col items-center justify-center py-3 gap-1 font-bold text-xs transition-all duration-200",
-            activeTab === 'socios'
-              ? "text-brand-blue"
-              : "text-slate-400 hover:text-slate-600"
-          )}
+          onClick={handleLogout}
+          aria-label="Cerrar sesión"
+          className="w-14 shrink-0 flex flex-col items-center justify-center py-3 gap-1 font-bold text-[10px] text-slate-400 hover:text-red-600"
         >
-          <Users className={clsx("w-5 h-5", activeTab === 'socios' && "scale-110")} />
-          <span>SOCIOS</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('nosocios')}
-          className={clsx(
-            "flex-1 flex flex-col items-center justify-center py-3 gap-1 font-bold text-xs transition-all duration-200",
-            activeTab === 'nosocios'
-              ? "text-brand-blue"
-              : "text-slate-400 hover:text-slate-600"
-          )}
-        >
-          <UserPlus className={clsx("w-5 h-5", activeTab === 'nosocios' && "scale-110")} />
-          <span>NO SOCIOS</span>
+          <LogOut className="w-5 h-5" />
+          <span>SALIR</span>
         </button>
       </div>
     </>

@@ -7,7 +7,12 @@ service cloud.firestore {
       return request.auth != null
         && request.auth.token.email != null
         && request.auth.token.email.lower() in [
-          'juventud@bethilel.org.ar'
+          'juventud@bethilel.org.ar',
+          'gan@bethilel.org.ar',
+          'ligdol@bethilel.org.ar',
+          'tikva@bethilel.org.ar',
+          'ramah@bethilel.org.ar',
+          'maale@bethilel.org.ar'
         ];
     }
 

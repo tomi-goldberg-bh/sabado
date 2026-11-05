@@ -1,17 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Users, UserPlus, Wifi, WifiOff } from 'lucide-react';
-import { syncService } from '../services/syncService';
+import { archivoService } from '../services/archivoService';
 import clsx from 'clsx';
 
 export const Sidebar = ({ activeTab, setActiveTab }) => {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const unsub = syncService.subscribe((event, data) => {
-      if (event === 'status') setConnected(data);
-    });
-    setConnected(syncService.isConnected());
-    return unsub;
+    return archivoService.subscribeStatus(({ online, synced }) => setConnected(online && synced));
   }, []);
   return (
     <>

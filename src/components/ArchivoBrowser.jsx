@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { X, Download, Clock, FileText } from 'lucide-react';
 import { archivoService } from '../services/archivoService';
 import clsx from 'clsx';
@@ -7,16 +7,40 @@ export const ArchivoBrowser = ({ onClose, initialFilter }) => {
   const [selectedDate, setSelectedDate] = useState(null);
   const [tipoFilter, setTipoFilter] = useState(initialFilter || 'todos');
 
-  const allData = useMemo(() => archivoService.getAllRecords(), []);
-  const dates = useMemo(() => archivoService.getAvailableDates(), []);
+  const [days, setDays] = useState([]);
+  const [loadingDays, setLoadingDays] = useState(true);
+  const [loaded, setLoaded] = useState({ date: null, records: [] });
+  const dayRecords = loaded.records;
+  const loadingRecords = selectedDate !== null && loaded.date !== selectedDate;
+
+  const dates = useMemo(() => days.map(d => d.date), [days]);
+  const countByDate = useMemo(() => Object.fromEntries(days.map(d => [d.date, d.count || 0])), [days]);
+
+  useEffect(() => {
+    let mounted = true;
+    archivoService.getAvailableDays()
+      .then(list => { if (mounted) setDays(list); })
+      .catch(() => {})
+      .finally(() => { if (mounted) setLoadingDays(false); });
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedDate) return undefined;
+    let mounted = true;
+    archivoService.getRecordsByDate(selectedDate)
+      .then(list => { if (mounted) setLoaded({ date: selectedDate, records: list }); })
+      .catch(() => { if (mounted) setLoaded({ date: selectedDate, records: [] }); });
+    return () => { mounted = false; };
+  }, [selectedDate]);
 
   const records = useMemo(() => {
     if (!selectedDate) return [];
-    return (allData[selectedDate] || []).filter(r => {
+    return dayRecords.filter(r => {
       if (tipoFilter === 'todos') return true;
       return r.tipo === tipoFilter;
     });
-  }, [allData, selectedDate, tipoFilter]);
+  }, [dayRecords, selectedDate, tipoFilter]);
 
   const formatDateLabel = (key) => {
     const [d, m, y] = key.split('-');
@@ -52,7 +76,9 @@ export const ArchivoBrowser = ({ onClose, initialFilter }) => {
         <div className="flex flex-1 min-h-0">
           <div className="w-56 border-r border-slate-200 p-4 overflow-y-auto flex-shrink-0 hidden md:block">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Fechas disponibles</p>
-            {dates.length === 0 ? (
+            {loadingDays ? (
+              <p className="text-sm text-slate-400">Cargando...</p>
+            ) : dates.length === 0 ? (
               <p className="text-sm text-slate-400">No hay archivos guardados.</p>
             ) : (
               <ul className="space-y-1">
@@ -72,7 +98,7 @@ export const ArchivoBrowser = ({ onClose, initialFilter }) => {
                         {formatDateLabel(date)}
                       </span>
                       <span className="text-xs opacity-70">
-                        {(allData[date] || []).length} registros
+                        {countByDate[date]} registros
                       </span>
                     </button>
                   </li>
@@ -92,7 +118,7 @@ export const ArchivoBrowser = ({ onClose, initialFilter }) => {
                 <option value="">Seleccionar fecha...</option>
                 {dates.map(date => (
                   <option key={date} value={date}>
-                    {formatDateLabel(date)} ({(allData[date] || []).length} registros)
+                    {formatDateLabel(date)} ({countByDate[date]} registros)
                   </option>
                 ))}
               </select>
@@ -129,7 +155,11 @@ export const ArchivoBrowser = ({ onClose, initialFilter }) => {
                 </div>
 
                 <div className="flex-1 overflow-y-auto">
-                  {records.length === 0 ? (
+                  {loadingRecords ? (
+                    <div className="h-full flex items-center justify-center text-slate-400">
+                      <p>Cargando registros...</p>
+                    </div>
+                  ) : records.length === 0 ? (
                     <div className="h-full flex items-center justify-center text-slate-400">
                       <p>No hay registros para esta fecha y filtro.</p>
                     </div>

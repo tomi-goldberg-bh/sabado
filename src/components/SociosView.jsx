@@ -3,13 +3,13 @@ import { Search, Trash2, CheckCircle2, Clock, FolderOpen, Download, History, Loa
 import { archivoService } from '../services/archivoService';
 import { recentNamesService } from '../services/recentNamesService';
 import { sociosSheetService } from '../services/sociosSheetService';
-import { syncService } from '../services/syncService';
 import { ArchivoBrowser } from './ArchivoBrowser';
 
 export const SociosView = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showOptions, setShowOptions] = useState(false);
-  const [allRecords, setAllRecords] = useState(() => archivoService.getAllRecords());
+  const [todayKey, setTodayKey] = useState(archivoService.getTodayKey);
+  const [todayRecords, setTodayRecords] = useState([]);
   const [filteredOptions, setFilteredOptions] = useState([]);
   const [showArchivo, setShowArchivo] = useState(false);
   const [sheetSocios, setSheetSocios] = useState(() => sociosSheetService.getCachedSocios());
@@ -29,58 +29,26 @@ export const SociosView = () => {
     return () => { mounted = false; };
   }, []);
 
+  // Si la app queda abierta pasada la medianoche, pasar al día nuevo.
   useEffect(() => {
-    syncService.connect();
-    const unsub = syncService.subscribe((event, data) => {
-      if (event === 'init') {
-        setAllRecords(data.records || {});
-      } else if (event === 'new_record') {
-        const { record } = data;
-        if (record.tipo === 'socio') {
-          setAllRecords(prev => {
-            const date = data.date || Object.keys(prev).sort().pop() || archivoService.getTodayKey();
-            const next = { ...prev };
-            if (!next[date]) next[date] = [];
-            const idx = next[date].findIndex(r => r.id === record.id);
-            if (idx >= 0) next[date][idx] = record;
-            else next[date] = [record, ...next[date]];
-            return next;
-          });
-        }
-      } else if (event === 'deleted_record') {
-        const { id } = data;
-        setAllRecords(prev => {
-          const next = { ...prev };
-          for (const date of Object.keys(next)) {
-            next[date] = next[date].filter(r => r.id !== id);
-            if (next[date].length === 0) delete next[date];
-          }
-          return next;
-        });
-      } else if (event === 'day_closed') {
-        const { date } = data;
-        if (date) alert(`El día ${date} fue cerrado por otro dispositivo.`);
-      }
-    });
-    return () => { unsub(); syncService.disconnect(); };
+    const timer = setInterval(() => {
+      const key = archivoService.getTodayKey();
+      setTodayKey(prev => (prev === key ? prev : key));
+    }, 60000);
+    return () => clearInterval(timer);
   }, []);
 
-  const socioRecords = useMemo(() => {
-    const result = {};
-    for (const [date, records] of Object.entries(allRecords)) {
-      const socios = records.filter(r => r.tipo === 'socio');
-      if (socios.length > 0) result[date] = socios;
-    }
-    return result;
-  }, [allRecords]);
+  // Registros del día en tiempo real, compartidos entre todos los dispositivos.
+  useEffect(() => {
+    return archivoService.subscribeDay(todayKey, setTodayRecords);
+  }, [todayKey]);
 
-  const dateKeys = useMemo(() => {
-    return Object.keys(socioRecords).sort((a, b) => {
-      const [d1, m1, y1] = a.split('-').map(Number);
-      const [d2, m2, y2] = b.split('-').map(Number);
-      return new Date(y2, m2 - 1, d2) - new Date(y1, m1 - 1, d1);
-    });
-  }, [socioRecords]);
+  const socioRecords = useMemo(() => {
+    const socios = todayRecords.filter(r => r.tipo === 'socio');
+    return socios.length > 0 ? { [todayKey]: socios } : {};
+  }, [todayRecords, todayKey]);
+
+  const dateKeys = useMemo(() => Object.keys(socioRecords), [socioRecords]);
 
   const totalCount = useMemo(() => {
     return Object.values(socioRecords).reduce((sum, arr) => sum + arr.length, 0);
@@ -116,38 +84,29 @@ export const SociosView = () => {
   }, [wrapperRef]);
 
   const handleSelectSocio = (socio) => {
-    const today = archivoService.getTodayKey();
-    const todaySocios = socioRecords[today] || [];
+    const todaySocios = socioRecords[todayKey] || [];
     const exists = todaySocios.some(r => r.name.toLowerCase() === socio.name.toLowerCase());
     if (!exists) {
-      const id = Date.now() + Math.floor(Math.random() * 1000);
       const entry = {
-        id,
         tipo: 'socio',
         socioOriginalId: socio.isRecent ? null : socio.id,
         name: socio.name,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       archivoService.saveRecord(entry);
-      syncService.saveRecord(entry);
       recentNamesService.addName(socio.name);
-      setAllRecords(archivoService.getAllRecords());
     }
     setSearchTerm('');
     setShowOptions(false);
   };
 
-  const handleRemove = (id) => {
-    archivoService.deleteRecord(id);
-    syncService.deleteRecord(id);
-    setAllRecords(archivoService.getAllRecords());
+  const handleRemove = (record) => {
+    archivoService.deleteRecord(record);
   };
 
-  const handleCloseDay = () => {
-    const success = archivoService.downloadTodayReport();
-    if (success) {
-      syncService.closeDay(archivoService.getTodayKey());
-    } else {
+  const handleCloseDay = async () => {
+    const success = await archivoService.downloadTodayReport();
+    if (!success) {
       alert('No hay registros hoy para exportar.');
     }
   };
@@ -246,7 +205,7 @@ export const SociosView = () => {
           {totalCount === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 py-10">
               <CheckCircle2 className="w-12 h-12 mb-4 opacity-20" />
-              <p>Aún no hay registros de socios</p>
+              <p>Aún no hay registros de socios hoy</p>
             </div>
           ) : (
             <div className="space-y-6">
@@ -267,7 +226,7 @@ export const SociosView = () => {
                           </p>
                         </div>
                         <button
-                          onClick={() => handleRemove(person.id)}
+                          onClick={() => handleRemove(person)}
                           className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
                           title="Eliminar registro"
                         >

@@ -3,7 +3,6 @@ import { Search, Trash2, CheckCircle2, Clock, Wallet, Smartphone, Plus, DollarSi
 import { archivoService } from '../services/archivoService';
 import { recentNamesService } from '../services/recentNamesService';
 import { nosociosSheetService } from '../services/nosociosSheetService';
-import { syncService } from '../services/syncService';
 import { ArchivoBrowser } from './ArchivoBrowser';
 import clsx from 'clsx';
 
@@ -40,27 +39,6 @@ const PRICE_OPTIONS = [
   { key: 'otro', label: 'Otro monto (Manual)', amount: null },
 ];
 
-const STORAGE_KEY = 'nosocios_registros';
-
-const todayKey = () => new Date().toISOString().split('T')[0];
-
-const loadFromStorage = () => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : {};
-  } catch {
-    return {};
-  }
-};
-
-const saveToStorage = (records) => {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-  } catch {
-    // storage full or unavailable
-  }
-};
-
 const formatAmount = (amount) => {
   if (amount == null || amount === '') return '';
   return `$${Number(amount).toLocaleString('es-AR')}`;
@@ -69,7 +47,8 @@ const formatAmount = (amount) => {
 export const NoSociosView = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showOptions, setShowOptions] = useState(false);
-  const [allRecords, setAllRecords] = useState(loadFromStorage);
+  const [todayKey, setTodayKey] = useState(archivoService.getTodayKey);
+  const [todayRecords, setTodayRecords] = useState([]);
   const [filteredOptions, setFilteredOptions] = useState([]);
   const [selectedNames, setSelectedNames] = useState([]);
   const [paymentMethod, setPaymentMethod] = useState('');
@@ -96,9 +75,12 @@ export const NoSociosView = () => {
     return option ? option.amount : '';
   }, [selectedPriceKey, customAmount]);
 
-  const dateKeys = useMemo(() => {
-    return Object.keys(allRecords).sort((a, b) => b.localeCompare(a));
-  }, [allRecords]);
+  const allRecords = useMemo(() => {
+    const noSocios = todayRecords.filter(r => r.tipo === 'no_socio');
+    return noSocios.length > 0 ? { [todayKey]: noSocios } : {};
+  }, [todayRecords, todayKey]);
+
+  const dateKeys = useMemo(() => Object.keys(allRecords), [allRecords]);
 
   const totalCount = useMemo(() => {
     return Object.values(allRecords).reduce((sum, arr) => sum + arr.length, 0);
@@ -145,44 +127,19 @@ export const NoSociosView = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [wrapperRef]);
 
+  // Si la app queda abierta pasada la medianoche, pasar al día nuevo.
   useEffect(() => {
-    syncService.connect();
-    const unsub = syncService.subscribe((event, data) => {
-      if (event === 'init') {
-        setAllRecords(data.records || {});
-        saveToStorage(data.records || {});
-      } else if (event === 'new_record') {
-        const { record } = data;
-        if (record.tipo === 'no_socio') {
-          setAllRecords(prev => {
-            const date = data.date || Object.keys(prev).sort().pop() || todayKey();
-            const next = { ...prev };
-            if (!next[date]) next[date] = [];
-            const idx = next[date].findIndex(r => r.id === record.id);
-            if (idx >= 0) next[date][idx] = record;
-            else next[date] = [record, ...next[date]];
-            saveToStorage(next);
-            return next;
-          });
-        }
-      } else if (event === 'deleted_record') {
-        const { id } = data;
-        setAllRecords(prev => {
-          const next = { ...prev };
-          for (const date of Object.keys(next)) {
-            next[date] = next[date].filter(r => r.id !== id);
-            if (next[date].length === 0) delete next[date];
-          }
-          saveToStorage(next);
-          return next;
-        });
-      } else if (event === 'day_closed') {
-        const { date } = data;
-        if (date) alert(`El día ${date} fue cerrado por otro dispositivo.`);
-      }
-    });
-    return () => { unsub(); syncService.disconnect(); };
+    const timer = setInterval(() => {
+      const key = archivoService.getTodayKey();
+      setTodayKey(prev => (prev === key ? prev : key));
+    }, 60000);
+    return () => clearInterval(timer);
   }, []);
+
+  // Registros del día en tiempo real, compartidos entre todos los dispositivos.
+  useEffect(() => {
+    return archivoService.subscribeDay(todayKey, setTodayRecords);
+  }, [todayKey]);
 
   const toggleGroup = (group) => {
     setSelectedGroups(prev =>
@@ -266,9 +223,7 @@ export const NoSociosView = () => {
     const joinedName = names.join(' + ');
     names.forEach(n => recentNamesService.addName(n));
 
-    const today = todayKey();
     const entry = {
-      id: Date.now(),
       tipo: 'no_socio',
       name: joinedName,
       names: names,
@@ -280,13 +235,6 @@ export const NoSociosView = () => {
     };
 
     archivoService.saveRecord(entry);
-    syncService.saveRecord(entry);
-
-    const updated = { ...allRecords };
-    if (!updated[today]) updated[today] = [];
-    updated[today] = [entry, ...updated[today]];
-    setAllRecords(updated);
-    saveToStorage(updated);
 
     setSearchTerm('');
     setSelectedNames([]);
@@ -297,23 +245,13 @@ export const NoSociosView = () => {
     setShowOptions(false);
   };
 
-  const handleRemove = (id) => {
-    archivoService.deleteRecord(id);
-    syncService.deleteRecord(id);
-    const updated = { ...allRecords };
-    for (const date of Object.keys(updated)) {
-      updated[date] = updated[date].filter(r => r.id !== id);
-      if (updated[date].length === 0) delete updated[date];
-    }
-    setAllRecords(updated);
-    saveToStorage(updated);
+  const handleRemove = (record) => {
+    archivoService.deleteRecord(record);
   };
 
-  const handleCloseDay = () => {
-    const success = archivoService.downloadTodayReport();
-    if (success) {
-      syncService.closeDay(archivoService.getTodayKey());
-    } else {
+  const handleCloseDay = async () => {
+    const success = await archivoService.downloadTodayReport();
+    if (!success) {
       alert('No hay registros hoy para exportar.');
     }
   };
@@ -401,7 +339,7 @@ export const NoSociosView = () => {
   };
 
   const formatDateLabel = (dateStr) => {
-    const [y, m, d] = dateStr.split('-');
+    const [d, m, y] = dateStr.split('-');
     return `${d}/${m}/${y}`;
   };
 
@@ -657,7 +595,7 @@ export const NoSociosView = () => {
           {totalCount === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 py-6">
               <CheckCircle2 className="w-12 h-12 mb-4 opacity-20" />
-              <p>Aún no hay registros de no socios</p>
+              <p>Aún no hay registros de no socios hoy</p>
             </div>
           ) : (
             <div className="space-y-6">
@@ -709,7 +647,7 @@ export const NoSociosView = () => {
                           </div>
                         </div>
                         <button
-                          onClick={() => handleRemove(person.id)}
+                          onClick={() => handleRemove(person)}
                           className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors md:opacity-0 md:group-hover:opacity-100 shrink-0"
                           title="Eliminar registro"
                         >
